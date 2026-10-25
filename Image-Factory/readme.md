@@ -4,10 +4,33 @@ This is a PowerShell script that creates and maintains a set of Windows virtual 
 
 # What is this all about? #
 
-For more information - read here: http://blogs.msdn.com/b/virtual_pc_guy/archive/2015/06/16/script-image-factory-for-hyper-v.aspx
+For more information - read here (archived): https://web.archive.org/web/20151112162739/http://blogs.msdn.com/b/virtual_pc_guy/archive/2015/06/16/script-image-factory-for-hyper-v.aspx
 
+The flow is still the one the post describes; the 2026 update changed what it builds and how.
+
+# Requirements #
+
+* A Hyper-V host (Windows Server 2022/2025 or Windows 11), run as administrator
+* A virtual switch with Internet access for the factory VM
+* ISOs (or install.wim / install.esd) in `ISOs\`, listed in `$Images` in FactoryVariables.ps1
+* `$adminPassword` and `$userPassword` set in FactoryVariables.ps1. The final images carry them in plain text in
+  `\Windows\Panther\unattend.xml` until the deployed VM's first logon deletes it, so use throwaway passwords.
+
+PSWindowsUpdate is downloaded from the PowerShell Gallery on first run. Convert-WindowsImage is no longer needed.
 
 # Change Log #
+
+10/25/26 -
+* Windows Server 2022, Windows Server 2025 and Windows 11 only; everything older (and 32 bit) removed
+* Generation 2 only, Secure Boot left on; Windows 11 VMs get a TPM. Fixes the `if($Gen = 2)` assignment from the #36 fix
+* Base disk built with New-VHD, Expand-WindowsImage and bcdboot instead of Convert-WindowsImage (TechNet Gallery is gone)
+* PSWindowsUpdate from the PowerShell Gallery; updates installed with Install-WindowsUpdate
+* Windows 11: device encryption prevented, Store app auto-update blocked during the factory run (it breaks sysprep)
+* Timeouts on the VM run and the Internet check (HTTPS instead of ping); one failed image no longer stops the rest
+* Empty product keys allowed; editions picked by image name or index (Get-WindowsImage)
+* Panther unattend copy removed from the base image and on the deployed VM's first logon
+* Checkpoints disabled on the factory VM; transcript written to `Logs\`; ISO 8601 dates in Details.csv
+* Images listed in `$Images` in FactoryVariables.ps1 rather than in Factory.ps1
 
 10/30/15 -
 * Changes from Garry Martin

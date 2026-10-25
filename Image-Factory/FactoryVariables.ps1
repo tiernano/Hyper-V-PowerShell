@@ -1,19 +1,26 @@
 # Seperate file for variables - this when you pull down the latest factory file you can keep your paths / product keys etc...
 $workingDir = "C:\FactoryTest"
 $logFile = "$($workingDir)\Share\Details.csv"
-$ResourceDirectory = "$($workingDir)\Resources" 
+$ResourceDirectory = "$($workingDir)\Resources"
 $Organization = "The Power Elite"
 $Owner = "Ben Armstrong"
-$Timezone = "Pacific Standard Time"
-$adminPassword = "P@ssw0rd"
-$userPassword = "P@ssw0rd"
+$Timezone = "GMT Standard Time"
+
+# Must be set before the first run. These end up in plain text in the unattend file inside every image in Share,
+# until the deployed VM's first logon deletes it - so use a throwaway password and change it after deployment.
+$adminPassword = ""
+$userPassword = ""
 
 # VM Settings
     # Name of the VM - make sure this does not conflict with any existing virtual machine, because it gets deleted automatically!
     $factoryVMName = "Factory VM"
 
-    # Amount of memory to give the VM - more memory usually makes updates install faster
-    $VMMemory = 2048mb
+    # Amount of memory and CPUs to give the VM - Windows 11 needs at least 4GB and 2 CPUs
+    $VMMemory = 4096mb
+    $VMProcessorCount = 2
+
+    # Give up on a VM run (update or sysprep) after this many minutes - a hung sysprep otherwise waits forever
+    $VMTimeoutMinutes = 240
 
     # Virtual switch to connect to - needs internet access to download updates
     $virtualSwitchName = "Virtual Switch"
@@ -30,33 +37,19 @@ $userPassword = "P@ssw0rd"
     $Dns = '10.10.10.2'
     $IPType = 'IPv4'
 
-
-# Keys
-$Windows10Key = ""
-$Windows7Key = ""
-$Windows2008R2Key = ""
-
-$Windows81Key = ""
-$Windows2012R2Key = ""
-
-$Windows8Key = ""
-$Windows2012Key = ""
-
-$Windows2016Key = ""
-
-# ISOs /  WIMs
-$2016Image = "$($workingDir)\ISOs\en_windows_server_2016_technical_preview_4_x64_dvd_7258292.iso"
-$2008R2Image = "$($workingDir)\ISOs\en_windows_server_2008_r2_standard_enterprise_datacenter_and_web_with_sp1_x64_dvd_617601.wim"
-$2012Image = "$($workingDir)\ISOs\en_windows_server_2012_x64_dvd_915478.wim"
-$2012R2Image = "$($workingDir)\ISOs\en_windows_server_2012_r2_x64_dvd_2707946.wim"
-$7x86Image = "$($workingDir)\ISOs\en_windows_7_enterprise_with_sp1_x86_dvd_u_677710.wim"
-$7x64Image = "$($workingDir)\ISOs\en_windows_7_enterprise_with_sp1_x64_dvd_u_677651.wim"
-$8x86Image = "$($workingDir)\ISOs\en_windows_8_x86_dvd_915417.wim"
-$8x64Image = "$($workingDir)\ISOs\en_windows_8_x64_dvd_915440.wim"
-$81x86Image = "$($workingDir)\ISOs\en_windows_8_1_x86_dvd_2707392.wim"
-$81x64Image = "$($workingDir)\ISOs\en_windows_8_1_x64_dvd_2707217.wim"
-$10x86Image = "$($workingDir)\ISOs\en_windows_10_multiple_editions_x86_dvd_6848465.wim"
-$10x64Image = "$($workingDir)\ISOs\en_windows_10_multiple_editions_x64_dvd_6846432.wim"
+# Images to build. ISOFile is an ISO, or an install.wim / install.esd.
+# SKUEdition is the image name or index; list them with:
+#   Get-WindowsImage -ImagePath D:\sources\install.wim   (mount the ISO first; install.esd on consumer media)
+# Evaluation ISOs use different names, eg. "Windows Server 2025 Datacenter Evaluation (Desktop Experience)".
+# ProductKey can be left empty (evaluation media, or activate later). The KMS client keys (GVLKs) are published at
+#   https://learn.microsoft.com/windows-server/get-started/kms-client-activation-keys
+$Images = @(
+    @{ FriendlyName = "Windows Server 2025 Datacenter Core";   ISOFile = "$($workingDir)\ISOs\WindowsServer2025.iso"; SKUEdition = "Windows Server 2025 Datacenter";                        ProductKey = "" }
+    @{ FriendlyName = "Windows Server 2025 Datacenter";        ISOFile = "$($workingDir)\ISOs\WindowsServer2025.iso"; SKUEdition = "Windows Server 2025 Datacenter (Desktop Experience)"; ProductKey = "" }
+    @{ FriendlyName = "Windows Server 2022 Datacenter Core";   ISOFile = "$($workingDir)\ISOs\WindowsServer2022.iso"; SKUEdition = "Windows Server 2022 Datacenter";                        ProductKey = "" }
+    @{ FriendlyName = "Windows Server 2022 Datacenter";        ISOFile = "$($workingDir)\ISOs\WindowsServer2022.iso"; SKUEdition = "Windows Server 2022 Datacenter (Desktop Experience)"; ProductKey = "" }
+    @{ FriendlyName = "Windows 11 Pro";                        ISOFile = "$($workingDir)\ISOs\Windows11.iso";         SKUEdition = "Windows 11 Pro";                                        ProductKey = ""; Desktop = $true }
+)
 
 # Misc Settings
 # If $startfactory is false, just import the functions to use in other scripts.  If true, start image generation.
@@ -64,6 +57,3 @@ $StartFactory = $true
 
 # If enabled, will use dism.exe to clean the WinSXS folder and remove old updates. This can give significant disk savings, but takes longer (20-30 minutes per image). Updates will not be able to be uninstalled if this is enabled.
 $CleanWinSXS = $false
-
-# If enabled, will use the legacy VHD format rather than VHDX to support Hyper-V before Windows Server 2012
-$LegacyVHD = $false
