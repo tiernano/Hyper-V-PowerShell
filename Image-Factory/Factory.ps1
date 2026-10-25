@@ -1,5 +1,7 @@
+#Requires -RunAsAdministrator
+#Requires -Modules Hyper-V, Dism
 # Load variables from a seperate file - this when you pull down the latest factory file you can keep your paths / product keys etc...
-. .\FactoryVariables.ps1
+. "$PSScriptRoot\FactoryVariables.ps1"
 $startTime = get-date
 
 
@@ -10,7 +12,7 @@ function checkPath
     (
         [string] $path
     )
-    if (!(Test-Path $path)) 
+    if (!(Test-Path $path))
     {
         $null = md $path;
     }
@@ -22,31 +24,22 @@ if(-not (Test-Path -Path $workingDir -PathType Container)) {
   Throw "Working directory $workingDir does not exist - edit FactoryVariables.ps1 to configure script"
 }
 
+if(-not $adminPassword -or -not $userPassword) {
+  Throw 'Set $adminPassword and $userPassword in FactoryVariables.ps1'
+}
+
 # Create folders in workingDir if they don't exist
 checkPath "$($workingdir)\Share"
 checkPath "$($workingdir)\Bases"
 checkPath "$($workingdir)\ISOs"
+checkPath "$($workingdir)\Logs"
 checkPath "$($workingdir)\Resources"
 checkPath "$($workingdir)\Resources\bits"
 
-### Load Convert-WindowsImage - making sure it exists and is unblocked
-if(Test-Path -Path "$($workingDir)\resources\Convert-WindowsImage.ps1") {
-    . "$($workingDir)\resources\Convert-WindowsImage.ps1"
-    if(!(Get-Command Convert-WindowsImage -ErrorAction SilentlyContinue)) {
-        Write-Host -ForegroundColor Green 'Convert-WindowsImage.ps1 could not be loaded. Unblock the script or check execution policy'
-        Throw 'Convert-WindowsImage was not loaded'
-    }
-} else {
-    Write-Host -ForegroundColor Green "Please download Convert-WindowsImage.ps1 and place in $($workingDir)\Resources\"
-    Write-Host -ForegroundColor Green "`nhttps://gallery.technet.microsoft.com/scriptcenter/Convert-WindowsImageps1-0fe23a8f`n"
-    Throw 'Missing Convert-WindowsImage.ps1 script'
-}
-
-# Check that PSWindowsUpdate module exists
-if(!(Test-Path -Path "$($workingDir)\Resources\bits\PSWindowsUpdate\PSWindowsUpdate.psm1")) {
-    Write-Host -ForegroundColor Green "Please download PSWindowsUpdate and extract to $($workingDir)\Resources\bits"
-    Write-Host -ForegroundColor Green "`nhttps://gallery.technet.microsoft.com/scriptcenter/2d191bcd-3308-4edd-9de2-88dff796b0bc`n"
-    Throw 'Missing PSWindowsUpdate module'
+# PSWindowsUpdate goes into Bits so the factory VM can load it - fetch it from the PowerShell Gallery if it is missing
+if(-not (Get-ChildItem "$($ResourceDirectory)\bits\PSWindowsUpdate" -Recurse -Filter PSWindowsUpdate.psd1 -ErrorAction SilentlyContinue)) {
+    Write-Host -ForegroundColor Green "Downloading PSWindowsUpdate to $($ResourceDirectory)\bits"
+    Save-Module -Name PSWindowsUpdate -Path "$($ResourceDirectory)\bits" -Repository PSGallery -ErrorAction Stop
 }
 
 
@@ -58,34 +51,39 @@ $unattendSource = [xml]@"
     <settings pass="specialize">
         <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
             <ComputerName>*</ComputerName>
-            <ProductKey>Key</ProductKey> 
+            <ProductKey>Key</ProductKey>
             <RegisteredOrganization>Organization</RegisteredOrganization>
             <RegisteredOwner>Owner</RegisteredOwner>
             <TimeZone>TZ</TimeZone>
         </component>
-        <component name="Microsoft-Windows-TerminalServices-LocalSessionManager" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"> 
-             <fDenyTSConnections>false</fDenyTSConnections> 
-         </component> 
-         <component name="Microsoft-Windows-TerminalServices-RDP-WinStationExtensions" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"> 
-             <UserAuthentication>0</UserAuthentication> 
-         </component> 
-         <component name="Networking-MPSSVC-Svc" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"> 
-             <FirewallGroups> 
-                 <FirewallGroup wcm:action="add" wcm:keyValue="RemoteDesktop"> 
-                     <Active>true</Active> 
-                     <Profile>all</Profile> 
-                     <Group>@FirewallAPI.dll,-28752</Group> 
-                 </FirewallGroup> 
-             </FirewallGroups> 
-         </component> 
+        <component name="Microsoft-Windows-TerminalServices-LocalSessionManager" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+             <fDenyTSConnections>false</fDenyTSConnections>
+         </component>
+         <component name="Microsoft-Windows-TerminalServices-RDP-WinStationExtensions" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+             <UserAuthentication>0</UserAuthentication>
+         </component>
+         <component name="Networking-MPSSVC-Svc" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+             <FirewallGroups>
+                 <FirewallGroup wcm:action="add" wcm:keyValue="RemoteDesktop">
+                     <Active>true</Active>
+                     <Profile>all</Profile>
+                     <Group>@FirewallAPI.dll,-28752</Group>
+                 </FirewallGroup>
+             </FirewallGroups>
+         </component>
+         <!-- Windows 11 turns on device encryption when it finds a TPM; an encrypted base disk could not be mounted or compacted -->
+         <component name="Microsoft-Windows-SecureStartup-FilterDriver" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+             <PreventDeviceEncryption>true</PreventDeviceEncryption>
+         </component>
     </settings>
     <settings pass="oobeSystem">
         <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
             <OOBE>
                 <HideEULAPage>true</HideEULAPage>
                 <HideLocalAccountScreen>true</HideLocalAccountScreen>
+                <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+                <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
                 <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
-                <NetworkLocation>Work</NetworkLocation>
                 <ProtectYourPC>1</ProtectYourPC>
             </OOBE>
             <UserAccounts>
@@ -113,12 +111,12 @@ $unattendSource = [xml]@"
                <LogonCount>1000</LogonCount>
                <Username>Administrator</Username>
             </AutoLogon>
-             <LogonCommands> 
-                 <AsynchronousCommand wcm:action="add"> 
-                     <CommandLine>%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell -NoLogo -NonInteractive -ExecutionPolicy Unrestricted -File %SystemDrive%\Bits\Logon.ps1</CommandLine> 
-                     <Order>1</Order> 
-                 </AsynchronousCommand> 
-             </LogonCommands> 
+             <LogonCommands>
+                 <AsynchronousCommand wcm:action="add">
+                     <CommandLine>%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell -NoLogo -NonInteractive -ExecutionPolicy Bypass -File %SystemDrive%\Bits\Logon.ps1</CommandLine>
+                     <Order>1</Order>
+                 </AsynchronousCommand>
+             </LogonCommands>
         </component>
         <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
             <InputLocale>en-us</InputLocale>
@@ -134,7 +132,7 @@ $unattendSource = [xml]@"
 function CSVLogger {
     param
     (
-        [string] $vhd, 
+        [string] $vhd,
         [switch] $sysprepped
     );
 
@@ -142,6 +140,7 @@ function CSVLogger {
     $entryExists = $false;
     $logCsv = @();
     $newEntry = $null;
+    $now = Get-Date -Format 'yyyy-MM-dd HH:mm';
 
     # Check if the log file exists
     if (-not (Test-Path $logFile))
@@ -155,7 +154,7 @@ function CSVLogger {
         if (($logCsv.Image -eq $null) -or `
             ($logCsv.Created -eq $null) -or `
             ($logCsv.Sysprepped -eq $null) -or `
-            ($logCsv.Checked -eq $null)) 
+            ($logCsv.Checked -eq $null))
         {
             # Something is wrong with the log file
             cleanupFile $logFile;
@@ -166,10 +165,6 @@ function CSVLogger {
     if ($createLogFile)
     {
         $logCsv = @();
-    } 
-    else 
-    {
-        $logCsv = Import-Csv $logFile;
     }
 
     # If we find an entry for the VHD, update it
@@ -178,29 +173,29 @@ function CSVLogger {
         if ($entry.Image -eq $vhd)
         {
             $entryExists = $true;
-            $entry.Checked = ((Get-Date).ToShortDateString() + "::" + (Get-Date).ToShortTimeString());
-            
-            if ($sysprepped) 
+            $entry.Checked = $now;
+
+            if ($sysprepped)
             {
-                $entry.Sysprepped = ((Get-Date).ToShortDateString() + "::" + (Get-Date).ToShortTimeString());
+                $entry.Sysprepped = $now;
             }
         }
     }
 
     # if no entry is found, create a new one
-    if (-not $entryExists) 
+    if (-not $entryExists)
     {
         $newEntry = New-Object PSObject -Property @{
             Image = $vhd
-            Created = ((Get-Date).ToShortDateString() + "::" + (Get-Date).ToShortTimeString())
-            Sysprepped = ((Get-Date).ToShortDateString() + "::" + (Get-Date).ToShortTimeString())
-            Checked = ((Get-Date).ToShortDateString() + "::" + (Get-Date).ToShortTimeString())
+            Created = $now
+            Sysprepped = $now
+            Checked = $now
         };
     }
 
     # Write out the CSV file
     $logCsv | Export-CSV $logFile -NoTypeInformation;
-    if (-not ($newEntry -eq $null)) 
+    if (-not ($newEntry -eq $null))
     {
         $newEntry | Export-CSV $logFile -NoTypeInformation -Append;
     }
@@ -227,48 +222,58 @@ function cleanupFile
     (
         [string] $file
     )
-    
-    if (Test-Path $file) 
+
+    if (Test-Path $file)
     {
-        Remove-Item $file -Recurse > $null;
+        Remove-Item $file -Recurse -Force > $null;
     }
 }
 
-
-
-function GetUnattendChunk 
+function GetUnattendChunk
 {
     param
     (
-        [string] $pass, 
-        [string] $component, 
+        [string] $pass,
+        [string] $component,
         [xml] $unattend
-    ); 
-    
+    );
+
     # Helper function that returns one component chunk from the Unattend XML data structure
     return $Unattend.unattend.settings | ? pass -eq $pass `
         | select -ExpandProperty component `
         | ? name -eq $component;
 }
 
-function makeUnattendFile 
+function removeUnattendNode
 {
     param
     (
-        [string] $key, 
-        [string] $logonCount, 
-        [string] $filePath, 
-        [bool] $desktop = $false, 
-        [bool] $is32bit = $false
-    ); 
+        [xml] $unattend,
+        [string] $xpath
+    );
+
+    $ns = New-Object System.Xml.XmlNamespaceManager($unattend.NameTable);
+    $ns.AddNamespace("ns", $unattend.DocumentElement.NamespaceURI);
+    $node = $unattend.SelectSingleNode($xpath, $ns);
+    $node.ParentNode.RemoveChild($node) | Out-Null;
+}
+
+function makeUnattendFile
+{
+    param
+    (
+        [string] $key,
+        [string] $logonCount,
+        [string] $filePath,
+        [bool] $desktop = $false
+    );
 
     # Composes unattend file and writes it to the specified filepath
-     
+
     # Reload template - clone is necessary as PowerShell thinks this is a "complex" object
     $unattend = $unattendSource.Clone();
-     
+
     # Customize unattend XML
-    GetUnattendChunk "specialize" "Microsoft-Windows-Shell-Setup" $unattend | %{$_.ProductKey = $key};
     GetUnattendChunk "specialize" "Microsoft-Windows-Shell-Setup" $unattend | %{$_.RegisteredOrganization = $Organization};
     GetUnattendChunk "specialize" "Microsoft-Windows-Shell-Setup" $unattend | %{$_.RegisteredOwner = $Owner};
     GetUnattendChunk "specialize" "Microsoft-Windows-Shell-Setup" $unattend | %{$_.TimeZone = $Timezone};
@@ -276,109 +281,185 @@ function makeUnattendFile
     GetUnattendChunk "oobeSystem" "Microsoft-Windows-Shell-Setup" $unattend | %{$_.AutoLogon.Password.Value = $adminPassword};
     GetUnattendChunk "oobeSystem" "Microsoft-Windows-Shell-Setup" $unattend | %{$_.AutoLogon.LogonCount = $logonCount};
 
-    if ($desktop)
+    # No key (evaluation media, or activating later) - leave the element out rather than sending an empty one
+    if ($key)
     {
-        GetUnattendChunk "oobeSystem" "Microsoft-Windows-Shell-Setup" $unattend | %{$_.UserAccounts.LocalAccounts.LocalAccount.Password.Value = $userPassword};
-        # HideLocalAccountScreen setting applies only to the Windows Server editions, and only to Windows Server 2012 and above
-        # This will remove the setting for desktop images
-        $ns = New-Object System.Xml.XmlNamespaceManager($unattend.NameTable);
-        $ns.AddNamespace("ns", $unattend.DocumentElement.NamespaceURI);
-        $node = $unattend.SelectSingleNode("//ns:HideLocalAccountScreen", $ns);
-        $node.ParentNode.RemoveChild($node) | Out-Null;
-	}
+        GetUnattendChunk "specialize" "Microsoft-Windows-Shell-Setup" $unattend | %{$_.ProductKey = $key};
+    }
     else
     {
-        # Desktop needs a user other than "Administrator" to be present
-        # This will remove the creation of the other user for server images
-        $ns = New-Object System.Xml.XmlNamespaceManager($unattend.NameTable);
-        $ns.AddNamespace("ns", $unattend.DocumentElement.NamespaceURI);
-        $node = $unattend.SelectSingleNode("//ns:LocalAccounts", $ns);
-        $node.ParentNode.RemoveChild($node) | Out-Null;
-
-        if ($FriendlyName.substring(0,19) -eq "Windows Server 2008")
-        {
-            # HideLocalAccountScreen setting applies only to the Windows Server editions, and only to Windows Server 2012 and above
-            # This will remove the setting for Windows Server 2008 R2 images
-            $ns = New-Object System.Xml.XmlNamespaceManager($unattend.NameTable);
-            $ns.AddNamespace("ns", $unattend.DocumentElement.NamespaceURI);
-            $node = $unattend.SelectSingleNode("//ns:HideLocalAccountScreen", $ns);
-            $node.ParentNode.RemoveChild($node) | Out-Null;
-    	}
+        removeUnattendNode $unattend "//ns:ProductKey";
     }
-     
-    if ($is32bit) 
+
+    if ($desktop)
     {
-        $unattend.InnerXml = $unattend.InnerXml.Replace('processorArchitecture="amd64"', 'processorArchitecture="x86"');
+        # Windows 11 needs a user other than "Administrator" to be present, and HideLocalAccountScreen is server only
+        GetUnattendChunk "oobeSystem" "Microsoft-Windows-Shell-Setup" $unattend | %{$_.UserAccounts.LocalAccounts.LocalAccount.Password.Value = $userPassword};
+        removeUnattendNode $unattend "//ns:HideLocalAccountScreen";
+    }
+    else
+    {
+        # Servers need neither the extra user nor the device encryption setting (client only)
+        removeUnattendNode $unattend "//ns:LocalAccounts";
+        removeUnattendNode $unattend "//ns:component[@name='Microsoft-Windows-SecureStartup-FilterDriver']";
     }
 
     # Write it out to disk
     cleanupFile $filePath; $Unattend.Save($filePath);
 }
 
-function createRunAndWaitVM 
+function createRunAndWaitVM
 {
     param
     (
-        [string] $vhd, 
-        [string] $gen
+        [string] $vhd,
+        [bool] $desktop = $false
     );
-    
+
     # Function for whenever I have a VHD that is ready to run
-    New-VM $factoryVMName -MemoryStartupBytes $VMMemory -VHDPath $vhd -Generation $Gen -SwitchName $virtualSwitchName -ErrorAction Stop| Out-Null
+    # Generation 2 with Secure Boot on (the MicrosoftWindows template is the Gen 2 default)
+    New-VM $factoryVMName -MemoryStartupBytes $VMMemory -VHDPath $vhd -Generation 2 -SwitchName $virtualSwitchName -ErrorAction Stop | Out-Null
 
     If($UseVLAN) {
         Get-VMNetworkAdapter -VMName $factoryVMName | Set-VMNetworkAdapterVlan -Access -VlanId $VlanId
     }
-    
-    # check if the generation is 2, and set secure boot to off: fixing #36
-    if($Gen = 2)
+
+    # Windows 11 requires a TPM. The VM is thrown away after each run, so a local key protector is fine.
+    if ($desktop)
     {
-        Set-VMFirmware $factoryvmname -EnableSecureBoot Off
+        Set-VMKeyProtector -VMName $factoryVMName -NewLocalKeyProtector;
+        Enable-VMTPM -VMName $factoryVMName;
     }
 
-    set-vm -Name $factoryVMName -ProcessorCount 2;
+    # No checkpoints: client Hyper-V takes one on start by default, which would leave an .avhdx on top of our disk
+    Set-VM -Name $factoryVMName -ProcessorCount $VMProcessorCount -CheckpointType Disabled;
     Start-VM $factoryVMName;
 
     # Give the VM a moment to start before we start checking for it to stop
-    Sleep -Seconds 10;
+    Start-Sleep -Seconds 10;
 
     # Wait for the VM to be stopped for a good solid 5 seconds
+    $deadline = (Get-Date).AddMinutes($VMTimeoutMinutes);
     do
     {
-        $state1 = (Get-VM | ? name -eq $factoryVMName).State;
+        if ((Get-Date) -gt $deadline)
+        {
+            Stop-VM $factoryVMName -TurnOff -Force;
+            Remove-VM $factoryVMName -Force;
+            throw "Factory VM still running after $VMTimeoutMinutes minutes (a failed sysprep leaves it sitting at the desktop - see \Windows\System32\Sysprep\Panther\setupact.log on the disk)";
+        }
+
+        $state1 = (Get-VM -Name $factoryVMName).State;
         Start-Sleep -Seconds 5;
-        
-        $state2 = (Get-VM | ? name -eq $factoryVMName).State;
+
+        $state2 = (Get-VM -Name $factoryVMName).State;
         Start-Sleep -Seconds 5;
-    } 
+    }
     until (($state1 -eq "Off") -and ($state2 -eq "Off"))
 
     # Clean up the VM
     Remove-VM $factoryVMName -Force;
 }
 
-function MountVHDandRunBlock 
+function MountVHDandRunBlock
 {
     param
     (
-        [string]$vhd, 
+        [string]$vhd,
         [scriptblock]$block,
         [switch]$ReadOnly
     );
-     
+
     # This function mounts a VHD, runs a script block and unmounts the VHD.
     # Drive letter of the mounted VHD is stored in $driveLetter - can be used by script blocks
-    if($ReadOnly) {
-        $driveLetter = (Mount-VHD $vhd -ReadOnly -Passthru | Get-Disk | Get-Partition | Get-Volume).DriveLetter;
-    } else {
-        $driveLetter = (Mount-VHD $vhd -Passthru | Get-Disk | Get-Partition | Get-Volume).DriveLetter;
+    # Only the Windows (NTFS) volume gets a letter; the EFI and MSR partitions do not.
+    $driveLetter = (Mount-VHD $vhd -ReadOnly:$ReadOnly -Passthru | Get-Disk | Get-Partition | Get-Volume |
+        Where-Object { $_.DriveLetter -and $_.FileSystem -eq 'NTFS' } | Select-Object -First 1).DriveLetter;
+    try
+    {
+        & $block;
     }
-    & $block;
+    finally
+    {
+        Dismount-VHD $vhd;
 
-    Dismount-VHD $vhd;
+        # Wait 2 seconds for activity to clean up
+        Start-Sleep -Seconds 2;
+    }
+}
 
-    # Wait 2 seconds for activity to clean up
-    Start-Sleep -Seconds 2;
+function New-BaseVHD
+{
+    param
+    (
+        [string] $ISOFile,
+        [string] $SKUEdition,
+        [string] $vhd,
+        [string] $unattendPath
+    );
+
+    # Replaces Convert-WindowsImage: GPT disk with EFI, MSR and Windows partitions, image applied with DISM, made bootable with bcdboot
+    $iso = $null;
+    if ($ISOFile -like '*.iso')
+    {
+        $iso = Mount-DiskImage -ImagePath $ISOFile -PassThru;
+        $isoDrive = ($iso | Get-Volume).DriveLetter;
+        $image = Get-Item "$($isoDrive):\sources\install.wim", "$($isoDrive):\sources\install.esd" -ErrorAction SilentlyContinue | Select-Object -First 1;
+    }
+    else
+    {
+        $image = Get-Item $ISOFile;
+    }
+
+    try
+    {
+        if (-not $image) { throw "No install.wim or install.esd in $ISOFile" }
+        if ($SKUEdition -match '^\d+$') { $edition = @{ Index = [int]$SKUEdition } } else { $edition = @{ Name = $SKUEdition } }
+
+        New-VHD -Path $vhd -SizeBytes 80GB -Dynamic | Out-Null;
+        $disk = Mount-VHD $vhd -Passthru | Get-Disk;
+        try
+        {
+            Initialize-Disk -Number $disk.Number -PartitionStyle GPT;
+
+            # Create the EFI partition as a data partition so it can be formatted, then change its type (as Convert-WindowsImage does)
+            $efi = New-Partition -DiskNumber $disk.Number -Size 260MB -GptType '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';
+            Format-Volume -Partition $efi -FileSystem FAT32 -Force -Confirm:$false | Out-Null;
+            $efi | Set-Partition -GptType '{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}';
+            $efi | Add-PartitionAccessPath -AssignDriveLetter;
+            $efiDrive = ($efi | Get-Partition).DriveLetter;
+
+            New-Partition -DiskNumber $disk.Number -Size 16MB -GptType '{e3c9e316-0b5c-4db8-817d-f92df00215ae}' | Out-Null;
+
+            $windows = New-Partition -DiskNumber $disk.Number -UseMaximumSize -GptType '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';
+            Format-Volume -Partition $windows -FileSystem NTFS -Force -Confirm:$false | Out-Null;
+            $windows | Add-PartitionAccessPath -AssignDriveLetter;
+            $windowsDrive = ($windows | Get-Partition).DriveLetter;
+
+            Expand-WindowsImage -ImagePath $image.FullName -ApplyPath "$($windowsDrive):\" @edition -ErrorAction Stop | Out-Null;
+            & bcdboot.exe "$($windowsDrive):\Windows" /s "$($efiDrive):" /f UEFI | Out-Null;
+            if ($LASTEXITCODE -ne 0) { throw "bcdboot failed with exit code $LASTEXITCODE" }
+
+            # Setup picks this up on first boot
+            checkPath "$($windowsDrive):\Windows\Panther";
+            Copy-Item $unattendPath "$($windowsDrive):\Windows\Panther\unattend.xml";
+
+            $efi | Remove-PartitionAccessPath -AccessPath "$($efiDrive):\";
+        }
+        finally
+        {
+            Dismount-VHD $vhd;
+        }
+    }
+    catch
+    {
+        cleanupFile $vhd;
+        throw;
+    }
+    finally
+    {
+        if ($iso) { Dismount-DiskImage -ImagePath $ISOFile | Out-Null }
+    }
 }
 
 ### Update script block
@@ -394,84 +475,17 @@ $updateCheckScriptBlock = {
         write-host " - ::$($message)" -ForegroundColor White;
     }
 
-    # Clean up unattend file if it is there
-    if (Test-Path "$ENV:SystemDrive\Unattend.xml") 
-    {
-        Remove-Item -Force "$ENV:SystemDrive\Unattend.xml"
-    }
+    # Clean up unattend files if they are there - the Panther copy holds the admin password in plain text
+    Remove-Item "$ENV:SystemDrive\Unattend.xml", "$ENV:SystemRoot\Panther\unattend.xml" -Force -ErrorAction SilentlyContinue
 
-    # Elements of the script rely on PowerShell 3.0, so install updated PowerShell if necessary
-    if ($PSVersionTable.PSVersion.Major -lt 3)
-    {
-        logger "Not running PowerShell 3.0 or above"
-        # First check .NET Framework 4.5 full version prerequisite
-        $DNVersion = Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP' -Recurse | Get-ItemProperty -name Version -EA 0 | Where-Object { $_.PSChildName -match '^(?!S)\p{L}'} | Sort-Object version -Descending | Select-Object -ExpandProperty Version -First 1 
-        $DNVersions = $DNVersion.Split(".") 
-        $DNVersionMajor = $DNVersions[0] 
-        $DNVersionMinor = $DNVersions[1] 
-        $DNVersionBuild = $DNVersions[2]
+    # Stop the Store updating apps for this user: sysprep fails on apps installed for a user but not provisioned.
+    # Removed again by the post-sysprep script on the deployed VM.
+    New-Item -Path HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore -Force | Out-Null
+    Set-ItemProperty -Path HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore -Name AutoDownload -Value 2 -Type DWord
 
-        if (($DNVersionMajor -eq 4 -and $DNVersionMinor -ge 5) -or ($DNVersionMajor -ge 4))
-        {
-            logger ".NET prerequisites met"
-        }
-        else
-        {
-            logger ".NET update required"
-            if (!(test-path -Path "C:\Temp"))
-            { 
-                New-Item -ItemType Directory -Force -Path "C:\Temp" > $null
-            }
-            logger "Downloading .NET 4.5.2" 
-            $download = New-Object Net.WebClient 
-            $url = "http://download.microsoft.com/download/E/2/1/E21644B5-2DF2-47C2-91BD-63C560427900/NDP452-KB2901907-x86-x64-AllOS-ENU.exe"
-            $file = ("C:\Temp\NDP452-KB2901907-x86-x64-AllOS-ENU.exe") 
-            $download.Downloadfile($url,$file) 
-            if (!(Test-Path -Path "C:\Temp\NDP452-KB2901907-x86-x64-AllOS-ENU.exe"))
-            {
-                logger "Download failed. Please check your Internet connection"
-            }
-            else
-            {
-                logger "Installing .NET 4.5.2"
-                $InstallDotNet = Start-Process $file -ArgumentList "/q /norestart" -Wait -PassThru 
-                logger ".NET 4.5.2 installation complete"
-            }	
-        }    		
-		
-        logger "Downloading Windows Management Framework 4.0"
-        if (!(test-path -Path "C:\Temp"))
-        { 
-            New-Item -ItemType Directory -Force -Path "C:\Temp" > $null
-        }
-        $download = New-Object Net.WebClient 
-        $url = "http://download.microsoft.com/download/3/D/6/3D61D262-8549-4769-A660-230B67E15B25/Windows6.1-KB2819745-x64-MultiPkg.msu"
-        $file = ("C:\Temp\Windows6.1-KB2819745-x64-MultiPkg.msu")
-        $commandline =  "C:\Temp\Windows6.1-KB2819745-x64-MultiPkg.msu /quiet /norestart"
-        $download.Downloadfile($url,$file) 
-        if (!(Test-Path -Path "C:\Temp\Windows6.1-KB2819745-x64-MultiPkg.msu"))
-        {
-            logger "Download failed. Please check your Internet connection"
-        }
-        else
-        {
-            logger "Installing Windows Management Framework 4.0"
-            $InstallWMF = Start-Process -FilePath 'wusa.exe' -ArgumentList "$commandline" -Wait -PassThru 
-            logger "Windows Management Framework 4.0 installation complete"
-        }
-        Invoke-Expression 'shutdown -r -t 0'
-    }
-	
-    # Check to see if files need to be unblocked - if they do, do it and reboot
-    if ((Get-ChildItem $env:SystemDrive\Bits | `
-        Get-Item -Stream "Zone.Identifier" -ErrorAction SilentlyContinue).Count -gt 0)
-    {
-        Get-ChildItem $env:SystemDrive\Bits | Unblock-File;
-        Invoke-Expression 'shutdown -r -t 0'
-    }
-
-    # To get here - the files are unblocked
-    Import-Module $env:SystemDrive\Bits\PSWindowsUpdate\PSWindowsUpdate;
+    # Files copied from a downloaded zip may be blocked
+    Get-ChildItem $env:SystemDrive\Bits -Recurse | Unblock-File
+    Import-Module (Get-ChildItem $env:SystemDrive\Bits\PSWindowsUpdate -Recurse -Filter PSWindowsUpdate.psd1 | Select-Object -First 1).FullName
 
     # Set static IP address - do not change values here, change them in FactoryVariables.ps1
     $UseStaticIP = STATICIPBOOLPLACEHOLDER
@@ -494,39 +508,41 @@ $updateCheckScriptBlock = {
         $adapter | New-NetIPAddress -AddressFamily $IPType `
             -IPAddress $IP `
             -PrefixLength $MaskBits `
-            -DefaultGateway $Gateway 
+            -DefaultGateway $Gateway
         # Configure the DNS client server IP addresses
-        $adapter | Set-DnsClientServerAddress -ServerAddresses $DNS  
+        $adapter | Set-DnsClientServerAddress -ServerAddresses $DNS
     }
 
-
-
-    # Need to add check for Internet connectivity due to Windows 7 driver load timing fail
-	logger "Checking for Internet connection" 
-    do
+    # Wait for the network - HTTPS rather than ping, which many networks drop. Give up after 10 minutes.
+    logger "Checking for Internet connection"
+    $deadline = (Get-Date).AddMinutes(10)
+    while (-not (Test-NetConnection -ComputerName www.microsoft.com -Port 443 -InformationLevel Quiet -WarningAction SilentlyContinue))
     {
-        Start-Sleep -Seconds 5;
-		logger "Checking for Internet connection"
-    } until (Test-Connection -computername www.microsoft.com)
-	
+        if ((Get-Date) -gt $deadline)
+        {
+            New-Item $env:SystemDrive\Bits\noInternet.txt -type file -Force > $null
+            Stop-Computer -Force
+            return
+        }
+        Start-Sleep -Seconds 5
+        logger "Checking for Internet connection"
+    }
+
     # Run pre-update script if it exists
     if (Test-Path "$env:SystemDrive\Bits\PreUpdateScript.ps1") {
         & "$env:SystemDrive\Bits\PreUpdateScript.ps1"
     }
 
     # Check if any updates are needed - leave a marker if there are
-	logger "Checking for updates" 
-    if ((Get-WUList).Count -gt 0)
+    logger "Checking for updates"
+    if ((Get-WindowsUpdate -NotCategory "Language packs" -IgnoreUserInput).Count -gt 0)
     {
-        if (-not (Test-Path $env:SystemDrive\Bits\changesMade.txt))
-        {
-            New-Item $env:SystemDrive\Bits\changesMade.txt -type file > $null;
-        }
+        New-Item $env:SystemDrive\Bits\changesMade.txt -type file -Force > $null
     }
- 
+
     # Apply all the updates
     logger "Applying the updates"
-    Get-WUInstall -AcceptAll -IgnoreReboot -IgnoreUserInput -NotCategory "Language packs";
+    Install-WindowsUpdate -AcceptAll -IgnoreReboot -IgnoreUserInput -NotCategory "Language packs"
 
     # Run post-update script if it exists
     if (Test-Path "$env:SystemDrive\Bits\PostUpdateScript.ps1") {
@@ -539,7 +555,7 @@ $updateCheckScriptBlock = {
         $interface = $adapter | Get-NetIPInterface -AddressFamily $IPType
 
         If ($interface.Dhcp -eq "Disabled") {
-            If (($interface | Get-NetIPConfiguration).Ipv4DefaultGateway) { 
+            If (($interface | Get-NetIPConfiguration).Ipv4DefaultGateway) {
                 $interface | Remove-NetRoute -Confirm:$false
             }
             $interface | Set-NetIPInterface -DHCP Enabled
@@ -548,19 +564,19 @@ $updateCheckScriptBlock = {
     }
 
     # Reboot if needed - otherwise shutdown because we are done
-    if (Get-WURebootStatus -Silent) 
+    if (Get-WURebootStatus -Silent)
     {
-        Invoke-Expression 'shutdown -r -t 0';
-    } 
+        Restart-Computer -Force
+    }
     else
     {
-        invoke-expression 'shutdown -s -t 0';
+        Stop-Computer -Force
     }
 };
 
 function Set-UpdateCheckPlaceHolders {
     $block = $updateCheckScriptBlock | Out-String -Width 4096
-    
+
     if($UseStaticIP) {
         $block = $block.Replace('$UseStaticIP = STATICIPBOOLPLACEHOLDER', '$UseStaticIP = $true')
         $block = $block.Replace('IPADDRESSPLACEHOLDER', $IP)
@@ -582,71 +598,36 @@ $sysprepScriptBlock = {
     }
 
     # Remove Unattend entries from the autorun key if they exist
-    foreach ($regvalue in (Get-Item -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run).Property)
-	{
-		if ($regvalue -like "Unattend*")
-		{
-		    # could be multiple unattend* entries
-		    foreach ($unattendvalue in $regvalue)
-		    {
-			    Remove-ItemProperty -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run -name $unattendvalue
-		    }
-        }
-	}
-             
+    $run = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
+    (Get-Item $run).Property | ? { $_ -like 'Unattend*' } | % { Remove-ItemProperty -Path $run -Name $_ }
+
     $unattendedXmlPath = "$ENV:SystemDrive\Bits\Unattend.xml";
     & "$ENV:SystemRoot\System32\Sysprep\Sysprep.exe" `/generalize `/oobe `/shutdown `/unattend:"$unattendedXmlPath";
 };
 
-### Post Sysprep script block
+### Post Sysprep script block - runs at the first logon of a VM deployed from the final image
 $postSysprepScriptBlock = {
     # Remove Unattend entries from the autorun key if they exist
-    foreach ($regvalue in (Get-Item -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run).Property)
-	{
-		if ($regvalue -like "Unattend*")
-		{
-		    # could be multiple unattend* entries
-		    foreach ($unattendvalue in $regvalue)
-		    {
-			    Remove-ItemProperty -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run -name $unattendvalue
-		    }
-        }
-	}
+    $run = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
+    (Get-Item $run).Property | ? { $_ -like 'Unattend*' } | % { Remove-ItemProperty -Path $run -Name $_ }
 
     # Run post-sysprep script if it exists
     if (Test-Path "$env:SystemDrive\Bits\PostSysprepScript.ps1") {
         & "$env:SystemDrive\Bits\PostSysprepScript.ps1"
     }
 
-    # Clean up unattend file if it is there
-    if (Test-Path "$ENV:SystemDrive\Unattend.xml") 
-    {
-        Remove-Item -Force "$ENV:SystemDrive\Unattend.xml";
-    }
+    # Clean up unattend files (Panther keeps a copy with the passwords in plain text), bits and temp
+    Remove-Item "$ENV:SystemDrive\Unattend.xml", "$ENV:SystemRoot\Panther\unattend.xml", "$ENV:SystemDrive\Bits", "$ENV:SystemDrive\Temp" `
+        -Force -Recurse -ErrorAction SilentlyContinue
 
-    # Clean up bits
-    if(Test-Path "$ENV:SystemDrive\Bits")
-    {
-        Remove-Item -Force -Recurse "$ENV:SystemDrive\Bits";
-    } 
-     
-    # Clean up temp
-    if(Test-Path "$ENV:SystemDrive\Temp")
-    {
-        Remove-Item -Force -Recurse "$ENV:SystemDrive\Temp";
-    } 
+    # Undo the factory's Store policy
+    Remove-ItemProperty -Path HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore -Name AutoDownload -ErrorAction SilentlyContinue
 
     # Remove Demo user
-	$computer = $env:computername
-	$user = "Demo"
-	if ([ADSI]::Exists("WinNT://$computer/$user"))
-	{
-	    [ADSI]$server = "WinNT://$computer"
-	    $server.delete("user",$user)
-	}
-	
+    Remove-LocalUser -Name demo -ErrorAction SilentlyContinue
+
     # Put any code you want to run Post sysprep here
-    Invoke-Expression 'shutdown -r -t 0';
+    Restart-Computer -Force
 };
 
 # This is the main function of this script
@@ -657,10 +638,10 @@ function Start-ImageFactory
 			Creates or updates a windows image with the latest windows updates.
 
             .DESCRIPTION
-            This function creates fully updated VHD images for deployment as virtual machines.
+            This function creates fully updated VHDX images for deployment as Generation 2 virtual machines.
 
             The first time it is called for a particular windows type, it creates a fresh install in a Hyper-V virtual machine,
-            updates it, and saves a sysprepped image. The unsysprepped VHD is kept so future runs only need to install new updates.
+            updates it, and saves a sysprepped image. The unsysprepped VHDX is kept so future runs only need to install new updates.
 
             Much of the configuration is done in FactoryVariables.ps1, which must be edited to suit your environment.
 
@@ -668,44 +649,32 @@ function Start-ImageFactory
 			Used as the file name for the image.
 
             .PARAMETER ISOFile
-            The ISO or WIM file to use as the base of the windows image.
+            The ISO, install.wim or install.esd file to use as the base of the windows image.
 
             .PARAMETER SKUEdition
-            The name of index number of the edition to use from the ISO/WIM file.  
-            eg. "Professional" or "ServerDataCenter"
+            The name or index number of the edition to use from the image (see Get-WindowsImage).
+            eg. "Windows 11 Pro" or "Windows Server 2025 Datacenter (Desktop Experience)"
 
             .PARAMETER ProductKey
-            The product key to use for the unattended installation.
+            The product key to use for the unattended installation. Leave empty for evaluation media.
 
             .PARAMETER Desktop
-            Set to $true for desktop windows versions. Creates a regular user account, which is required by the desktop unattended installation.
-
-            .PARAMETER Is32Bit
-            Set to $true for 32 bit images to create the unattend file correctly.
-
-            .PARAMETER Generation2
-            Create a generation 2 virtual machine.  Default is generation 1
+            Set to $true for Windows 11. Adds a TPM to the factory VM and creates the regular user account the client OOBE needs.
 
             .PARAMETER GenericSysprep
             Run the final sysprep without specifying a /unattend file.  This is required by some deployment tools like SCVMM which will run their own sysprep when deploying.
 
             .NOTES
-            This script requires two additional downloads:
-            PSWindowsUpdate from https://gallery.technet.microsoft.com/scriptcenter/2d191bcd-3308-4edd-9de2-88dff796b0bc
-
-            Convert-WindowsImage.ps1 from https://gallery.technet.microsoft.com/scriptcenter/Convert-WindowsImageps1-0fe23a8f
+            PSWindowsUpdate is downloaded from the PowerShell Gallery on first run.
 
 			.LINK
-            https://github.com/BenjaminArmstrong/Hyper-V-PowerShell
+            https://github.com/tiernano/Hyper-V-PowerShell
 
             .EXAMPLE
-            Start-ImageFactory -FriendlyName "Windows Server 2012 R2 DataCenter with GUI" -ISOFile c:\path\to\isos\server2012r2.iso -ProductKey "W3GGN-FT8W3-Y4M27-J84CP-Q3VJ9" -SKUEdition "ServerDataCenter"
+            Start-ImageFactory -FriendlyName "Windows Server 2025 Datacenter Core" -ISOFile c:\path\to\isos\server2025.iso -SKUEdition "Windows Server 2025 Datacenter"
 
             .EXAMPLE
-            Start-ImageFactory -FriendlyName "Windows Server 2012 R2 DataCenter Core - Gen 2" -ISOFile c:\path\to\isos\server2012r2.iso -ProductKey "W3GGN-FT8W3-Y4M27-J84CP-Q3VJ9" -SKUEdition "ServerDataCenterCore" -Generation2
-
-            .EXAMPLE
-            Start-ImageFactory -FriendlyName "Windows 8.1 Professional - 32 bit" -ISOFile c:\path\to\isos\windows81.iso -ProductKey "GCRJD-8NW9H-F2CDX-CCM8D-9D6T9" -SKUEdition "Professional" -desktop $true -is32bit $true
+            Start-ImageFactory -FriendlyName "Windows 11 Pro" -ISOFile c:\path\to\isos\windows11.iso -SKUEdition "Windows 11 Pro" -Desktop $true
 
 	#>
 
@@ -717,37 +686,21 @@ function Start-ImageFactory
         [string]$ProductKey,
         [string]$SKUEdition,
         [bool]$desktop = $false,
-        [bool]$is32bit = $false,
-        [switch]$Generation2,
         [bool] $GenericSysprep = $false
     );
 
     logger $FriendlyName "Starting a new cycle!"
 
-    # Setup a bunch of variables 
+    # Setup a bunch of variables
     $sysprepNeeded = $true;
 
-    $VHDFormat = "vhdx";
-    if ($LegacyVHD)
-    {
-        $VHDFormat = "vhd";
-    }
-
-    $baseVHD = "$($workingDir)\bases\$($FriendlyName)-base.$($VHDFormat)";
-    $updateVHD = "$($workingDir)\$($FriendlyName)-update.$($VHDFormat)";
-    $sysprepVHD = "$($workingDir)\$($FriendlyName)-sysprep.$($VHDFormat)";
-    $finalVHD = "$($workingDir)\share\$($FriendlyName).$($VHDFormat)";
-   
-    $VHDPartitionStyle = "MBR";
-    $Gen = 1;
-    if ($Generation2) 
-    {
-        $VHDPartitionStyle = "GPT";
-        $Gen = 2;
-    }
+    $baseVHD = "$($workingDir)\bases\$($FriendlyName)-base.vhdx";
+    $updateVHD = "$($workingDir)\$($FriendlyName)-update.vhdx";
+    $sysprepVHD = "$($workingDir)\$($FriendlyName)-sysprep.vhdx";
+    $finalVHD = "$($workingDir)\share\$($FriendlyName).vhdx";
 
     # Verify product key
-    if(-not ($ProductKey -imatch '^[a-z0-9]{5}-[a-z0-9]{5}-[a-z0-9]{5}-[a-z0-9]{5}-[a-z0-9]{5}$')) {
+    if($ProductKey -and -not ($ProductKey -imatch '^[a-z0-9]{5}-[a-z0-9]{5}-[a-z0-9]{5}-[a-z0-9]{5}-[a-z0-9]{5}$')) {
         logger $FriendlyName 'Invalid product key, skipping this product'
         return
     }
@@ -755,9 +708,9 @@ function Start-ImageFactory
     logger $FriendlyName "Checking for existing Factory VM";
 
     # Check if there is already a factory VM - and kill it if there is
-    if ((Get-VM | ? Name -eq $factoryVMName).Count -gt 0)
+    if (Get-VM -Name $factoryVMName -ErrorAction SilentlyContinue)
     {
-        Stop-VM $factoryVMName -TurnOff -Confirm:$false -Passthru | Remove-VM -Force;
+        Stop-VM $factoryVMName -TurnOff -Force -Passthru | Remove-VM -Force;
     }
 
     # Check for a base VHD
@@ -775,34 +728,32 @@ function Start-ImageFactory
         logger $FriendlyName "Creating unattend file for base VHD";
 
         # Logon count is just "large number"
-        makeUnattendFile -key $ProductKey -logonCount "1000" -filePath "$($workingDir)\unattend.xml" -desktop $desktop -is32bit $is32bit;
-      
+        makeUnattendFile -key $ProductKey -logonCount "1000" -filePath "$($workingDir)\unattend.xml" -desktop $desktop;
+
         # Time to create the base VHD
-        logger $FriendlyName "Create base VHD using Convert-WindowsImage.ps1";
-        $ConvertCommand = "Convert-WindowsImage";
-        $ConvertCommand = $ConvertCommand + " -SourcePath `"$ISOFile`" -VHDPath `"$baseVHD`"";
-        $ConvertCommand = $ConvertCommand + " -SizeBytes 80GB -VHDFormat $VHDFormat -UnattendPath `"$($workingDir)\unattend.xml`"";
-        $ConvertCommand = $ConvertCommand + " -Edition $SKUEdition -VHDPartitionStyle $VHDPartitionStyle";
-
-        Invoke-Expression "& $ConvertCommand";
-
-        # Clean up unattend file - we don't need it any more
-        logger $FriendlyName "Remove unattend file now that that is done";
-        cleanupFile "$($workingDir)\unattend.xml";
+        logger $FriendlyName "Create base VHD from $ISOFile";
+        try
+        {
+            New-BaseVHD -ISOFile $ISOFile -SKUEdition $SKUEdition -vhd $baseVHD -unattendPath "$($workingDir)\unattend.xml";
+        }
+        finally
+        {
+            # Clean up unattend file - we don't need it any more
+            logger $FriendlyName "Remove unattend file now that that is done";
+            cleanupFile "$($workingDir)\unattend.xml";
+        }
 
         logger $FriendlyName "Mount VHD and copy bits in, also set startup file";
         MountVHDandRunBlock $baseVHD {
-            cleanupFile -file "$($driveLetter):\Convert-WindowsImageInfo.txt";
-
             # Copy bits to VHD
             Copy-Item "$($ResourceDirectory)\bits" -Destination ($driveLetter + ":\") -Recurse;
-            
+
             # Create first logon script
             Set-UpdateCheckPlaceHolders | Out-File -FilePath "$($driveLetter):\Bits\Logon.ps1" -Width 4096;
         }
 
         logger $FriendlyName "Create virtual machine, start it and wait for it to stop...";
-        createRunAndWaitVM $baseVHD $Gen;
+        createRunAndWaitVM $baseVHD $desktop;
 
         # Remove Page file
         logger $FriendlyName "Removing the page file";
@@ -835,48 +786,45 @@ function Start-ImageFactory
         }
 
         logger $FriendlyName "Create virtual machine, start it and wait for it to stop...";
-        createRunAndWaitVM $updateVHD $Gen;
+        createRunAndWaitVM $updateVHD $desktop;
 
-        # Mount the VHD
-        logger $FriendlyName "Mount the differencing disk";
-        $driveLetter = (Mount-VHD $updateVHD -Passthru | Get-Disk | Get-Partition | Get-Volume).DriveLetter;
-       
         # Check to see if changes were made
         logger $FriendlyName "Check to see if there were any updates";
-        if (Test-Path "$($driveLetter):\Bits\changesMade.txt") 
-        {
-            cleanupFile "$($driveLetter):\Bits\changesMade.txt";
-            logger $FriendlyName "Updates were found";
-        }
-        else 
-        {
-            logger $FriendlyName "No updates were found"; 
-            $sysprepNeeded = $false;
-        }
+        $sysprepNeeded = MountVHDandRunBlock $updateVHD {
+            if (Test-Path "$($driveLetter):\Bits\noInternet.txt")
+            {
+                logger $FriendlyName "WARNING: the factory VM had no Internet access - no updates were checked";
+            }
 
-        # Dismount
-        logger $FriendlyName "Dismount the differencing disk";
-        Dismount-VHD $updateVHD;
-
-        # Wait 2 seconds for activity to clean up
-        Start-Sleep -Seconds 2;
+            if (Test-Path "$($driveLetter):\Bits\changesMade.txt")
+            {
+                cleanupFile "$($driveLetter):\Bits\changesMade.txt";
+                logger $FriendlyName "Updates were found";
+                $true
+            }
+            else
+            {
+                logger $FriendlyName "No updates were found";
+                $false
+            }
+        }
 
         # If changes were made - merge them in.  If not, throw it away
-        if ($sysprepNeeded) 
+        if ($sysprepNeeded)
         {
             logger $FriendlyName "Merge the differencing disk";
             Merge-VHD -Path $updateVHD -DestinationPath $baseVHD;
         }
-        else 
+        else
         {
-            logger $FriendlyName "Delete the differencing disk"; 
+            logger $FriendlyName "Delete the differencing disk";
             CSVLogger $finalVHD;
             cleanupFile $updateVHD;
         }
     }
 
     # Final Check - if the final VHD is missing - we need to sysprep and make it
-    if (-not (Test-Path $finalVHD)) 
+    if (-not (Test-Path $finalVHD))
     {
         $sysprepNeeded = $true;
     }
@@ -899,16 +847,16 @@ function Start-ImageFactory
             else
             {
                 # Make unattend file
-                makeUnattendFile -key $ProductKey -logonCount "1" -filePath "$($driveLetter):\Bits\unattend.xml" -desktop $desktop -is32bit $is32bit;
+                makeUnattendFile -key $ProductKey -logonCount "1" -filePath "$($driveLetter):\Bits\unattend.xml" -desktop $desktop;
             }
-            
+
             # Make the logon script
             cleanupFile "$($driveLetter):\Bits\Logon.ps1";
             $sysprepScriptBlockString | Out-File -FilePath "$($driveLetter):\Bits\Logon.ps1" -Width 4096;
         }
 
         logger $FriendlyName "Create virtual machine, start it and wait for it to stop...";
-        createRunAndWaitVM $sysprepVHD $Gen;
+        createRunAndWaitVM $sysprepVHD $desktop;
 
         logger $FriendlyName "Mount the differencing disk and cleanup files";
         MountVHDandRunBlock $sysprepVHD {
@@ -925,12 +873,8 @@ function Start-ImageFactory
                 # Cleanup \Bits as the postSysprepScriptBlock is not run anymore
                 cleanupFile "$($driveLetter):\Bits";
             }
-        }
 
-        # Remove Page file
-        logger $FriendlyName "Removing the page file";
-        MountVHDandRunBlock $sysprepVHD {
-
+            # Remove Page file
             attrib -s -h "$($driveLetter):\pagefile.sys";
             cleanupFile "$($driveLetter):\pagefile.sys";
         }
@@ -961,31 +905,19 @@ function Start-ImageFactory
 }
 
 if($startfactory) {
+    Start-Transcript -Path "$($workingDir)\Logs\Factory-$(Get-Date -Format 'yyyy-MM-dd-HHmm').log" | Out-Null
 
-    Start-ImageFactory -FriendlyName "Windows Server 2016 DataCenter Core - Gen 2" -ISOFile $2016Image -ProductKey $Windows2016Key -SKUEdition "ServerDataCenterCore" -Generation2;
-    Start-ImageFactory -FriendlyName "Windows Server 2016 DataCenter with GUI - Gen 2" -ISOFile $2016Image -ProductKey $Windows2016Key -SKUEdition "ServerDataCenter" -Generation2;
-    Start-ImageFactory -FriendlyName "Windows Server 2012 R2 DataCenter with GUI" -ISOFile $2012R2Image -ProductKey $Windows2012R2Key -SKUEdition "ServerDataCenter";
-    Start-ImageFactory -FriendlyName "Windows Server 2012 R2 DataCenter Core" -ISOFile $2012R2Image -ProductKey $Windows2012R2Key -SKUEdition "ServerDataCenterCore";
-    Start-ImageFactory -FriendlyName "Windows Server 2012 R2 DataCenter with GUI - Gen 2" -ISOFile $2012R2Image -ProductKey $Windows2012R2Key -SKUEdition "ServerDataCenter" -Generation2;
-    Start-ImageFactory -FriendlyName "Windows Server 2012 R2 DataCenter Core - Gen 2" -ISOFile $2012R2Image -ProductKey $Windows2012R2Key -SKUEdition "ServerDataCenterCore" -Generation2;
-    Start-ImageFactory -FriendlyName "Windows Server 2012 DataCenter with GUI" -ISOFile $2012Image -ProductKey $Windows2012Key -SKUEdition "ServerDataCenter";
-    Start-ImageFactory -FriendlyName "Windows Server 2012 DataCenter Core" -ISOFile $2012Image -ProductKey $Windows2012Key -SKUEdition "ServerDataCenterCore";
-    Start-ImageFactory -FriendlyName "Windows Server 2012 DataCenter with GUI - Gen 2" -ISOFile $2012Image -ProductKey $Windows2012Key -SKUEdition "ServerDataCenter" -Generation2;
-    Start-ImageFactory -FriendlyName "Windows Server 2012 DataCenter Core - Gen 2" -ISOFile $2012Image -ProductKey $Windows2012Key -SKUEdition "ServerDataCenterCore" -Generation2;
-    Start-ImageFactory -FriendlyName "Windows Server 2008 R2 DataCenter with GUI" -ISOFile $2008R2Image -ProductKey $Windows2008R2Key -SKUEdition "ServerDataCenter";
-    Start-ImageFactory -FriendlyName "Windows Server 2008 R2 DataCenter Core" -ISOFile $2008R2Image -ProductKey $Windows2008R2Key -SKUEdition "ServerDataCenterCore";
-    Start-ImageFactory -FriendlyName "Windows 8.1 Professional" -ISOFile $81x64Image -ProductKey $Windows81Key -SKUEdition "Professional" -desktop $true;
-    Start-ImageFactory -FriendlyName "Windows 8.1 Professional - Gen 2" -ISOFile $81x64Image -ProductKey $Windows81Key -SKUEdition "Professional" -Generation2  -desktop $true;
-    Start-ImageFactory -FriendlyName "Windows 8.1 Professional - 32 bit" -ISOFile $81x86Image -ProductKey $Windows81Key -SKUEdition "Professional" -desktop $true -is32bit $true;
-    Start-ImageFactory -FriendlyName "Windows 8 Professional" -ISOFile $8x64Image -ProductKey $Windows8Key -SKUEdition "Professional" -desktop $true;
-    Start-ImageFactory -FriendlyName "Windows 8 Professional - Gen 2" -ISOFile $8x64Image -ProductKey $Windows8Key -SKUEdition "Professional" -Generation2 -desktop $true;
-    Start-ImageFactory -FriendlyName "Windows 8 Professional - 32 bit" -ISOFile $8x86Image -ProductKey $Windows8Key -SKUEdition "Professional" -desktop $true -is32bit $true;
-    Start-ImageFactory -FriendlyName "Windows 7 Enterprise" -ISOFile $7x64Image -ProductKey $Windows7Key -SKUEdition "Enterprise" -desktop $true;
-    Start-ImageFactory -FriendlyName "Windows 7 Enterprise - 32 bit" -ISOFile $7x86Image -ProductKey $Windows7Key -SKUEdition "Enterprise" -desktop $true -is32bit $true;
-    Start-ImageFactory -FriendlyName "Windows 10 Professional" -ISOFile $10x64Image -ProductKey $Windows10Key -SKUEdition "Professional" -desktop $true;
-    Start-ImageFactory -FriendlyName "Windows 10 Professional - Gen 2" -ISOFile $10x64Image -ProductKey $Windows10Key -SKUEdition "Professional" -Generation2 -desktop $true;
-    Start-ImageFactory -FriendlyName "Windows 10 Professional - 32 bit" -ISOFile $10x86Image -ProductKey $Windows10Key -SKUEdition "Professional" -desktop $true -is32bit $true;
+    # One failed image (eg. a sysprep that timed out) should not stop the rest
+    foreach ($image in $Images) {
+        try {
+            Start-ImageFactory @image
+        } catch {
+            logger $image.FriendlyName "FAILED: $_"
+        }
+    }
 
+    logger "Factory" "Finished in $([int]((Get-Date) - $startTime).TotalMinutes) minutes"
+    Stop-Transcript | Out-Null
 } else {
     If($myinvocation.InvocationName -eq '.') {
         Write-Host 'Start-ImageFactory is ready to use'
